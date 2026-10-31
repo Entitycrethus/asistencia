@@ -1,0 +1,22 @@
+# Entornos virtuales de Python
+backend/venv/
+venv/
+*.pyc
+__pycache__/
+
+# Dependencias de Node (Frontend)
+frontend/node_modules/
+node_modules/
+frontend/dist/
+
+# Archivos de configuración y variables de entorno (¡Seguridad!)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+
+# Carpetas del sistema o editores
+.vscode/
+.idea/
+.DS_Store

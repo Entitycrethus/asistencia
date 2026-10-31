@@ -1,8 +1,8 @@
 from datetime import date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 from fastapi import APIRouter, HTTPException
-from app.database import get_supabase, t
-from app.routers.dashboard import procesar_faltas_automaticas, _resolve_tipo_incidencia_id
+from app.database import fetch_all, execute_returning
+from app.routers.dashboard import procesar_faltas_automaticas, registrar_marcaje_sql
 from app.schemas import (
     Asistencia,
     Incidencia,
@@ -11,11 +11,25 @@ from app.schemas import (
     HistorialAcceso,
     TipoIncidencia,
     ResumenFaltasUsuario,
+    MarcarQRRequest,
+    MarcarQRResponse,
 )
 
-
-
 router = APIRouter(prefix="/api/asistencias", tags=["Asistencias e Incidencias"])
+
+
+@router.post("/marcar-qr", response_model=MarcarQRResponse)
+def marcar_asistencia_desde_qr_movil(req: MarcarQRRequest):
+  
+  
+    resultado = registrar_marcaje_sql(
+        codigo_qr=req.codigo_qr,
+        dispositivo_id=req.dispositivo_id,
+        forzar_tardanza=False,
+        aplicar_antirrebote=True,
+        bloquear_si_jornada_completa=True,
+    )
+    return MarcarQRResponse(**resultado)
 
 
 @router.get("", response_model=List[Asistencia])
@@ -24,199 +38,143 @@ def listar_asistencias(
     usuario_id: Optional[int] = None,
     solo_faltas: Optional[bool] = None,
 ):
-    supabase = get_supabase()
-    procesar_faltas_automaticas(supabase, target_date=fecha or date.today().isoformat(), forzar_cierre=False)
+    procesar_faltas_automaticas(target_date=fecha or date.today().isoformat(), forzar_cierre=False)
 
-    query = supabase.table(t("Asistencia")).select("*")
+    condiciones = []
+    params: List[Any] = []
+
     if fecha:
-        query = query.eq("fecha", fecha)
-    if usuario_id:
-        query = query.eq("usuario_id", usuario_id)
-
-    asistencias = query.order("id", desc=True).execute().data or []
-    usuarios = {u["id"]: u for u in (supabase.table(t("Usuario")).select("*").execute().data or [])}
-    cargos = {c["id"]: c for c in (supabase.table(t("Cargo")).select("*").execute().data or [])}
-    dispositivos = {d["id"]: d for d in (supabase.table(t("Dispositivo")).select("*").execute().data or [])}
-    incidencias = supabase.table(t("Incidencia")).select("*").execute().data or []
-    tipos = supabase.table(t("TipoIncidencia")).select("*").execute().data or []
-    tipo_map = {ti["id"]: ti for ti in tipos}
-    tipo_falta_id = _resolve_tipo_incidencia_id(tipos, "falta", 2)
-
-    inc_por_asist: Dict[int, Dict[str, Any]] = {}
-    for inc in incidencias:
-        aid = inc.get("asistencia_id")
-        if aid is not None:
-            inc_por_asist[aid] = inc
-
-    resultado = []
-    for a in asistencias:
-        u = usuarios.get(a.get("usuario_id"), {})
-        c = cargos.get(u.get("cargo_id"), {})
-        d = dispositivos.get(a.get("dispositivo_id"), {})
-        inc_asoc = inc_por_asist.get(a["id"])
-        ti = tipo_map.get(inc_asoc.get("tipo_incidencia_id"), {}) if inc_asoc else {}
-        es_falta = (not a.get("hora_entrada")) or (
-            inc_asoc is not None and inc_asoc.get("tipo_incidencia_id") == tipo_falta_id
+        condiciones.append("a.fecha = %s::DATE")
+        params.append(fecha)
+    if usuario_id is not None:
+        condiciones.append("a.usuario_id = %s")
+        params.append(usuario_id)
+    if solo_faltas is True:
+        condiciones.append(
+            """(
+                a.hora_entrada IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM public.incidencia i2
+                    INNER JOIN public.tipo_incidencia ti2 ON ti2.id = i2.tipo_incidencia_id
+                    WHERE i2.asistencia_id = a.id
+                      AND LOWER(ti2.nombre) LIKE '%%falta%%'
+                )
+            )"""
         )
 
-        if solo_faltas is True and not es_falta:
-            continue
-        if solo_faltas is False and es_falta:
-            continue
+    where_sql = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
 
-        resultado.append(
-            Asistencia(
-                id=a["id"],
-                usuario_id=a["usuario_id"],
-                dispositivo_id=a["dispositivo_id"],
-                fecha=str(a.get("fecha", "")),
-                hora_entrada=str(a["hora_entrada"]) if a.get("hora_entrada") else None,
-                hora_salida=str(a["hora_salida"]) if a.get("hora_salida") else None,
-                usuario_nombre=f"{u.get('nombres', '')} {u.get('apellidos', '')}".strip() or "Usuario",
-                usuario_codigo=u.get("codigo", ""),
-                cargo_nombre=c.get("nombre", ""),
-                dispositivo_nombre=d.get("nombre", ""),
-                tiene_incidencia=inc_asoc is not None,
-                es_falta=es_falta,
-                tipo_incidencia_nombre=ti.get("nombre") if inc_asoc else ("Falta" if es_falta else None),
-            )
-        )
-    return resultado
+    sql = f"""
+        SELECT
+            a.id,
+            a.usuario_id,
+            a.dispositivo_id,
+            a.fecha::TEXT AS fecha,
+            a.hora_entrada::TEXT AS hora_entrada,
+            a.hora_salida::TEXT AS hora_salida,
+            (u.nombres || ' ' || u.apellidos) AS usuario_nombre,
+            u.codigo AS usuario_codigo,
+            c.nombre AS cargo_nombre,
+            COALESCE(d.nombre, 'Dispositivo') AS dispositivo_nombre,
+            EXISTS (
+                SELECT 1
+                FROM public.incidencia i
+                WHERE i.asistencia_id = a.id
+            ) AS tiene_incidencia,
+            (
+                a.hora_entrada IS NULL
+                OR EXISTS (
+                    SELECT 1
+                    FROM public.incidencia i2
+                    INNER JOIN public.tipo_incidencia ti2 ON ti2.id = i2.tipo_incidencia_id
+                    WHERE i2.asistencia_id = a.id
+                      AND LOWER(ti2.nombre) LIKE '%%falta%%'
+                )
+            ) AS es_falta,
+            (
+                SELECT ti3.nombre
+                FROM public.incidencia i3
+                INNER JOIN public.tipo_incidencia ti3 ON ti3.id = i3.tipo_incidencia_id
+                WHERE i3.asistencia_id = a.id
+                ORDER BY i3.id DESC
+                LIMIT 1
+            ) AS tipo_incidencia_nombre
+        FROM public.asistencia a
+        INNER JOIN public.usuario u ON u.id = a.usuario_id
+        INNER JOIN public.cargo c ON c.id = u.cargo_id
+        LEFT JOIN public.dispositivo d ON d.id = a.dispositivo_id
+        {where_sql}
+        ORDER BY a.id DESC;
+    """
+    rows = fetch_all(sql, tuple(params))
+    return [Asistencia(**r) for r in rows]
 
 
 @router.get("/resumen-usuarios", response_model=List[ResumenFaltasUsuario])
-def obtener_resumen_faltas_por_usuario(
-    fecha_inicio: Optional[str] = None,
-    fecha_fin: Optional[str] = None,
-):
-    supabase = get_supabase()
-    procesar_faltas_automaticas(supabase, target_date=date.today().isoformat(), forzar_cierre=False)
+def obtener_resumen_faltas_por_usuario():
+    procesar_faltas_automaticas(target_date=date.today().isoformat(), forzar_cierre=False)
 
-    usuarios = supabase.table(t("Usuario")).select("*").order("id", desc=False).execute().data or []
-    cargos = {c["id"]: c for c in (supabase.table(t("Cargo")).select("*").execute().data or [])}
-    asistencias = supabase.table(t("Asistencia")).select("*").execute().data or []
-    incidencias = supabase.table(t("Incidencia")).select("*").execute().data or []
-    tipos = supabase.table(t("TipoIncidencia")).select("*").execute().data or []
-
-    tipo_tardanza_id = _resolve_tipo_incidencia_id(tipos, "tardanza", 1)
-    tipo_falta_id = _resolve_tipo_incidencia_id(tipos, "falta", 2)
-    tipo_salida_id = _resolve_tipo_incidencia_id(tipos, "salida", 3)
-
-    # Filtrar asistencias por rango de fechas si aplica
-    asistencias_filtradas = []
-    for a in asistencias:
-        f_str = str(a.get("fecha", ""))
-        if fecha_inicio and f_str < fecha_inicio:
-            continue
-        if fecha_fin and f_str > fecha_fin:
-            continue
-        asistencias_filtradas.append(a)
-
-    asist_map = {a["id"]: a for a in asistencias_filtradas}
-
-    stats: Dict[int, Dict[str, int]] = {
-        u["id"]: {
-            "total_asistencias": 0,
-            "total_faltas": 0,
-            "faltas_justificadas": 0,
-            "faltas_injustificadas": 0,
-            "total_tardanzas": 0,
-            "total_salidas_anticipadas": 0,
-        }
-        for u in usuarios
-    }
-
-    asistencias_contadas_como_falta = set()
-
-    for inc in incidencias:
-        aid = inc.get("asistencia_id")
-        asist = asist_map.get(aid)
-        if not asist:
-            continue
-        uid = asist.get("usuario_id")
-        if uid not in stats:
-            continue
-
-        tid = inc.get("tipo_incidencia_id")
-        tiene_justif = bool((inc.get("justificacion") or "").strip())
-
-        if tid == tipo_falta_id:
-            stats[uid]["total_faltas"] += 1
-            asistencias_contadas_como_falta.add(aid)
-            if tiene_justif:
-                stats[uid]["faltas_justificadas"] += 1
-            else:
-                stats[uid]["faltas_injustificadas"] += 1
-        elif tid == tipo_tardanza_id:
-            stats[uid]["total_tardanzas"] += 1
-        elif tid == tipo_salida_id:
-            stats[uid]["total_salidas_anticipadas"] += 1
-
-    for a in asistencias_filtradas:
-        uid = a.get("usuario_id")
-        if uid not in stats:
-            continue
-        if a.get("hora_entrada"):
-            stats[uid]["total_asistencias"] += 1
-        elif a["id"] not in asistencias_contadas_como_falta:
-            stats[uid]["total_faltas"] += 1
-            stats[uid]["faltas_injustificadas"] += 1
-
-    resumen = []
-    for u in usuarios:
-        uid = u["id"]
-        st = stats[uid]
-        c = cargos.get(u.get("cargo_id"), {})
-        resumen.append(
-            ResumenFaltasUsuario(
-                usuario_id=uid,
-                codigo=u.get("codigo", ""),
-                usuario_nombre=f"{u.get('nombres', '')} {u.get('apellidos', '')}".strip() or "Usuario",
-                cargo_nombre=c.get("nombre", ""),
-                **st,
-            )
-        )
-
-    # Ordenar primero los que tienen más faltas o incidencias
-    resumen.sort(
-        key=lambda x: (x.total_faltas, x.total_tardanzas, x.total_asistencias),
-        reverse=True,
-    )
-    return resumen
+    sql = """
+        SELECT
+            u.id AS usuario_id,
+            u.codigo,
+            (u.nombres || ' ' || u.apellidos) AS usuario_nombre,
+            c.nombre AS cargo_nombre,
+            COUNT(DISTINCT CASE WHEN a.hora_entrada IS NOT NULL THEN a.id END)::INT AS total_asistencias,
+            COUNT(DISTINCT CASE
+                WHEN a.id IS NOT NULL AND (a.hora_entrada IS NULL OR LOWER(ti.nombre) LIKE '%%falta%%')
+                THEN a.id
+            END)::INT AS total_faltas,
+            COUNT(DISTINCT CASE
+                WHEN LOWER(ti.nombre) LIKE '%%falta%%' AND COALESCE(TRIM(i.justificacion), '') <> ''
+                THEN i.id
+            END)::INT AS faltas_justificadas,
+            (
+                COUNT(DISTINCT CASE
+                    WHEN a.id IS NOT NULL AND (a.hora_entrada IS NULL OR LOWER(ti.nombre) LIKE '%%falta%%')
+                    THEN a.id
+                END)
+                -
+                COUNT(DISTINCT CASE
+                    WHEN LOWER(ti.nombre) LIKE '%%falta%%' AND COALESCE(TRIM(i.justificacion), '') <> ''
+                    THEN i.id
+                END)
+            )::INT AS faltas_injustificadas,
+            COUNT(DISTINCT CASE WHEN LOWER(ti.nombre) LIKE '%%tardanza%%' THEN i.id END)::INT AS total_tardanzas,
+            COUNT(DISTINCT CASE WHEN LOWER(ti.nombre) LIKE '%%salida%%' THEN i.id END)::INT AS total_salidas_anticipadas
+        FROM public.usuario u
+        INNER JOIN public.cargo c ON c.id = u.cargo_id
+        LEFT JOIN public.asistencia a ON a.usuario_id = u.id
+        LEFT JOIN public.incidencia i ON i.asistencia_id = a.id
+        LEFT JOIN public.tipo_incidencia ti ON ti.id = i.tipo_incidencia_id
+        GROUP BY u.id, u.codigo, u.nombres, u.apellidos, c.nombre
+        ORDER BY total_faltas DESC, total_tardanzas DESC, total_asistencias DESC;
+    """
+    rows = fetch_all(sql)
+    return [ResumenFaltasUsuario(**r) for r in rows]
 
 
 @router.get("/historial", response_model=List[HistorialAcceso])
 def listar_historial_acceso(limit: int = 50):
-    supabase = get_supabase()
-    rows = (
-        supabase.table(t("HistorialAcceso"))
-        .select("*")
-        .order("id", desc=True)
-        .limit(limit)
-        .execute()
-        .data
-        or []
-    )
-    usuarios = {u["id"]: u for u in (supabase.table(t("Usuario")).select("*").execute().data or [])}
-    dispositivos = {d["id"]: d for d in (supabase.table(t("Dispositivo")).select("*").execute().data or [])}
-
-    return [
-        HistorialAcceso(
-            id=r["id"],
-            usuario_id=r["usuario_id"],
-            dispositivo_id=r["dispositivo_id"],
-            fecha_hora=str(r.get("fecha_hora", "")),
-            accion=r.get("accion", ""),
-            usuario_nombre=(
-                f"{usuarios.get(r['usuario_id'], {}).get('nombres', '')} "
-                f"{usuarios.get(r['usuario_id'], {}).get('apellidos', '')}"
-            ).strip()
-            or "Usuario",
-            usuario_codigo=usuarios.get(r["usuario_id"], {}).get("codigo", ""),
-            dispositivo_nombre=dispositivos.get(r["dispositivo_id"], {}).get("nombre", ""),
-        )
-        for r in rows
-    ]
+    sql = """
+        SELECT
+            ha.id,
+            ha.usuario_id,
+            ha.dispositivo_id,
+            ha.fecha_hora::TEXT AS fecha_hora,
+            ha.accion,
+            (u.nombres || ' ' || u.apellidos) AS usuario_nombre,
+            u.codigo AS usuario_codigo,
+            COALESCE(d.nombre, 'Dispositivo') AS dispositivo_nombre
+        FROM public.historial_acceso ha
+        INNER JOIN public.usuario u ON u.id = ha.usuario_id
+        LEFT JOIN public.dispositivo d ON d.id = ha.dispositivo_id
+        ORDER BY ha.id DESC
+        LIMIT %s;
+    """
+    rows = fetch_all(sql, (limit,))
+    return [HistorialAcceso(**r) for r in rows]
 
 
 @router.get("/incidencias", response_model=List[Incidencia])
@@ -224,66 +182,92 @@ def listar_incidencias(
     usuario_id: Optional[int] = None,
     tipo_incidencia_id: Optional[int] = None,
 ):
-    supabase = get_supabase()
-    rows = supabase.table(t("Incidencia")).select("*").order("id", desc=True).execute().data or []
-    asistencias = {a["id"]: a for a in (supabase.table(t("Asistencia")).select("*").execute().data or [])}
-    usuarios = {u["id"]: u for u in (supabase.table(t("Usuario")).select("*").execute().data or [])}
-    tipos = {ti["id"]: ti for ti in (supabase.table(t("TipoIncidencia")).select("*").execute().data or [])}
+    condiciones = []
+    params: List[Any] = []
+    if usuario_id is not None:
+        condiciones.append("a.usuario_id = %s")
+        params.append(usuario_id)
+    if tipo_incidencia_id is not None:
+        condiciones.append("i.tipo_incidencia_id = %s")
+        params.append(tipo_incidencia_id)
 
-    resultado = []
-    for r in rows:
-        asist = asistencias.get(r.get("asistencia_id"), {})
-        uid = asist.get("usuario_id")
-        if usuario_id is not None and uid != usuario_id:
-            continue
-        if tipo_incidencia_id is not None and r.get("tipo_incidencia_id") != tipo_incidencia_id:
-            continue
+    where_sql = f"WHERE {' AND '.join(condiciones)}" if condiciones else ""
 
-        u = usuarios.get(uid, {})
-        ti = tipos.get(r.get("tipo_incidencia_id"), {})
-        resultado.append(
-            Incidencia(
-                id=r["id"],
-                asistencia_id=r["asistencia_id"],
-                tipo_incidencia_id=r["tipo_incidencia_id"],
-                descripcion=r.get("descripcion", ""),
-                justificacion=r.get("justificacion") or "",
-                fecha_registro=str(r.get("fecha_registro", "")),
-                usuario_id=uid,
-                usuario_codigo=u.get("codigo", ""),
-                tipo_incidencia_nombre=ti.get("nombre", "Incidencia"),
-                usuario_nombre=f"{u.get('nombres', '')} {u.get('apellidos', '')}".strip() or "Usuario",
-                fecha_asistencia=str(asist.get("fecha", "")),
-            )
-        )
-    return resultado
+    sql = f"""
+        SELECT
+            i.id,
+            i.asistencia_id,
+            i.tipo_incidencia_id,
+            i.descripcion,
+            COALESCE(i.justificacion, '') AS justificacion,
+            i.fecha_registro::TEXT AS fecha_registro,
+            a.usuario_id,
+            u.codigo AS usuario_codigo,
+            (u.nombres || ' ' || u.apellidos) AS usuario_nombre,
+            ti.nombre AS tipo_incidencia_nombre,
+            a.fecha::TEXT AS fecha_asistencia
+        FROM public.incidencia i
+        INNER JOIN public.asistencia a ON a.id = i.asistencia_id
+        INNER JOIN public.usuario u ON u.id = a.usuario_id
+        INNER JOIN public.tipo_incidencia ti ON ti.id = i.tipo_incidencia_id
+        {where_sql}
+        ORDER BY i.id DESC;
+    """
+    rows = fetch_all(sql, tuple(params))
+    return [Incidencia(**r) for r in rows]
 
 
 @router.post("/incidencias", response_model=Incidencia)
 def crear_incidencia(payload: IncidenciaCreate):
-    supabase = get_supabase()
-    res = supabase.table(t("Incidencia")).insert(payload.model_dump()).execute()
-    if not res.data:
+    sql = """
+        INSERT INTO public.incidencia (
+            asistencia_id, tipo_incidencia_id, descripcion, justificacion, fecha_registro
+        )
+        VALUES (%s, %s, %s, %s, COALESCE(%s::TIMESTAMP, NOW()))
+        RETURNING
+            id,
+            asistencia_id,
+            tipo_incidencia_id,
+            descripcion,
+            COALESCE(justificacion, '') AS justificacion,
+            fecha_registro::TEXT AS fecha_registro;
+    """
+    row = execute_returning(
+        sql,
+        (
+            payload.asistencia_id,
+            payload.tipo_incidencia_id,
+            payload.descripcion,
+            payload.justificacion,
+            payload.fecha_registro,
+        ),
+    )
+    if not row:
         raise HTTPException(status_code=400, detail="No se pudo registrar la incidencia.")
-    return Incidencia(**res.data[0])
+    return Incidencia(**row)
 
 
 @router.patch("/incidencias/{incidencia_id}/justificar", response_model=Incidencia)
 def justificar_incidencia(incidencia_id: int, body: IncidenciaJustificar):
-    supabase = get_supabase()
-    res = (
-        supabase.table(t("Incidencia"))
-        .update({"justificacion": body.justificacion})
-        .eq("id", incidencia_id)
-        .execute()
-    )
-    if not res.data:
+    sql = """
+        UPDATE public.incidencia
+        SET justificacion = %s
+        WHERE id = %s
+        RETURNING
+            id,
+            asistencia_id,
+            tipo_incidencia_id,
+            descripcion,
+            COALESCE(justificacion, '') AS justificacion,
+            fecha_registro::TEXT AS fecha_registro;
+    """
+    row = execute_returning(sql, (body.justificacion, incidencia_id))
+    if not row:
         raise HTTPException(status_code=404, detail="Incidencia no encontrada.")
-    return Incidencia(**res.data[0])
+    return Incidencia(**row)
 
 
 @router.get("/tipos-incidencia", response_model=List[TipoIncidencia])
 def listar_tipos_incidencia():
-    supabase = get_supabase()
-    rows = supabase.table(t("TipoIncidencia")).select("*").execute().data or []
+    rows = fetch_all("SELECT id, nombre FROM public.tipo_incidencia ORDER BY id ASC;")
     return [TipoIncidencia(**r) for r in rows]

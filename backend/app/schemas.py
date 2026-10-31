@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
@@ -258,7 +258,7 @@ class ConfiguracionInstitucion(ConfiguracionInstitucionBase):
 
 
 # ==========================================
-# 10. AUTH, SIMULADOR Y EVALUACIÓN DE FALTAS
+# 10. AUTH, MARCAJE QR MÓVIL Y EVALUACIÓN DE FALTAS
 # ==========================================
 class LoginRequest(BaseModel):
     correo: str
@@ -269,6 +269,22 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     usuario: Usuario
+
+
+class MarcarQRRequest(BaseModel):
+    codigo_qr: str = Field(..., description="Código QR escaneado por la app móvil (ej. QR-DOC001)")
+    dispositivo_id: int = Field(1, description="ID del dispositivo lector registrado en la BD")
+
+
+class MarcarQRResponse(BaseModel):
+    ok: bool = True
+    mensaje: str
+    accion: str
+    estado_puntualidad: str
+    usuario: Dict[str, Any]
+    asistencia: Optional[Dict[str, Any]] = None
+    historial: Optional[Dict[str, Any]] = None
+    incidencia: Optional[Dict[str, Any]] = None
 
 
 class SimularAsistenciaRequest(BaseModel):

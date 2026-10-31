@@ -1,6 +1,6 @@
 from typing import List
 from fastapi import APIRouter, HTTPException
-from app.database import get_supabase, t
+from app.database import fetch_all, execute_returning
 from app.schemas import (
     Permiso,
     PermisoCreate,
@@ -14,64 +14,89 @@ router = APIRouter(prefix="/api/permisos", tags=["Permisos"])
 
 @router.get("", response_model=List[Permiso])
 def listar_permisos():
-    supabase = get_supabase()
-    rows = supabase.table(t("Permiso")).select("*").order("id", desc=True).execute().data or []
-    usuarios = {u["id"]: u for u in (supabase.table(t("Usuario")).select("*").execute().data or [])}
-    tipos = {tp["id"]: tp for tp in (supabase.table(t("TipoPermiso")).select("*").execute().data or [])}
-
-    return [
-        Permiso(
-            id=r["id"],
-            usuario_id=r["usuario_id"],
-            tipo_permiso_id=r["tipo_permiso_id"],
-            fecha_inicio=str(r.get("fecha_inicio", "")),
-            fecha_fin=str(r.get("fecha_fin", "")),
-            motivo=r.get("motivo", ""),
-            aprobado=bool(r.get("aprobado", False)),
-            usuario_nombre=(
-                f"{usuarios.get(r['usuario_id'], {}).get('nombres', '')} "
-                f"{usuarios.get(r['usuario_id'], {}).get('apellidos', '')}"
-            ).strip()
-            or "Usuario",
-            tipo_permiso_nombre=tipos.get(r["tipo_permiso_id"], {}).get("nombre", "Permiso"),
-        )
-        for r in rows
-    ]
+    sql = """
+        SELECT
+            p.id,
+            p.usuario_id,
+            p.tipo_permiso_id,
+            p.fecha_inicio::TEXT AS fecha_inicio,
+            p.fecha_fin::TEXT AS fecha_fin,
+            p.motivo,
+            p.aprobado,
+            (u.nombres || ' ' || u.apellidos) AS usuario_nombre,
+            tp.nombre AS tipo_permiso_nombre
+        FROM public.permiso p
+        INNER JOIN public.usuario u ON u.id = p.usuario_id
+        INNER JOIN public.tipo_permiso tp ON tp.id = p.tipo_permiso_id
+        ORDER BY p.id DESC;
+    """
+    rows = fetch_all(sql)
+    return [Permiso(**r) for r in rows]
 
 
 @router.post("", response_model=Permiso)
 def crear_permiso(payload: PermisoCreate):
-    supabase = get_supabase()
-    res = supabase.table(t("Permiso")).insert(payload.model_dump()).execute()
-    if not res.data:
+    sql = """
+        INSERT INTO public.permiso (
+            usuario_id, tipo_permiso_id, fecha_inicio, fecha_fin, motivo, aprobado
+        )
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING
+            id,
+            usuario_id,
+            tipo_permiso_id,
+            fecha_inicio::TEXT AS fecha_inicio,
+            fecha_fin::TEXT AS fecha_fin,
+            motivo,
+            aprobado;
+    """
+    row = execute_returning(
+        sql,
+        (
+            payload.usuario_id,
+            payload.tipo_permiso_id,
+            payload.fecha_inicio,
+            payload.fecha_fin,
+            payload.motivo,
+            payload.aprobado,
+        ),
+    )
+    if not row:
         raise HTTPException(status_code=400, detail="No se pudo registrar el permiso.")
-    return Permiso(**res.data[0])
+    return Permiso(**row)
 
 
 @router.patch("/{permiso_id}/estado", response_model=Permiso)
 def actualizar_estado_permiso(permiso_id: int, body: PermisoEstadoUpdate):
-    supabase = get_supabase()
-    res = (
-        supabase.table(t("Permiso"))
-        .update({"aprobado": body.aprobado})
-        .eq("id", permiso_id)
-        .execute()
-    )
-    if not res.data:
+    sql = """
+        UPDATE public.permiso
+        SET aprobado = %s
+        WHERE id = %s
+        RETURNING
+            id,
+            usuario_id,
+            tipo_permiso_id,
+            fecha_inicio::TEXT AS fecha_inicio,
+            fecha_fin::TEXT AS fecha_fin,
+            motivo,
+            aprobado;
+    """
+    row = execute_returning(sql, (body.aprobado, permiso_id))
+    if not row:
         raise HTTPException(status_code=404, detail="Permiso no encontrado.")
-    return Permiso(**res.data[0])
+    return Permiso(**row)
 
 
 @router.get("/tipos", response_model=List[TipoPermiso])
 def listar_tipos_permiso():
-    supabase = get_supabase()
-    rows = supabase.table(t("TipoPermiso")).select("*").execute().data or []
+    rows = fetch_all("SELECT id, nombre FROM public.tipo_permiso ORDER BY id ASC;")
     return [TipoPermiso(**r) for r in rows]
 
 
 @router.post("/tipos", response_model=TipoPermiso)
 def crear_tipo_permiso(payload: TipoPermisoCreate):
-    supabase = get_supabase()
-    res = supabase.table(t("TipoPermiso")).insert(payload.model_dump()).execute()
-    return TipoPermiso(**res.data[0])
-
+    row = execute_returning(
+        "INSERT INTO public.tipo_permiso (nombre) VALUES (%s) RETURNING id, nombre;",
+        (payload.nombre,),
+    )
+    return TipoPermiso(**row)

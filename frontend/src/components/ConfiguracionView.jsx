@@ -125,67 +125,10 @@ export default function ConfiguracionView({ dispositivos, onChanged }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Conexión a Supabase */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5">
-              <Database className="w-4 h-4 text-slate-700" />
-              <h3 className="text-sm font-semibold text-slate-900">
-                Conexión al Proyecto de Supabase
-              </h3>
-            </div>
-            <span
-              className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
-                conectado
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-slate-100 text-slate-600 border-slate-200'
-              }`}
-            >
-              {conectado ? 'Conectado a Supabase' : 'Modo Local de Demostración'}
-            </span>
-          </div>
 
-          <p className="text-xs text-slate-500 mb-4">
-            Puede configurar sus credenciales en <code className="font-mono bg-slate-100 px-1 py-0.5 rounded">backend/.env</code> y <code className="font-mono bg-slate-100 px-1 py-0.5 rounded">frontend/.env</code>, o ingresarlas aquí para conectar inmediatamente sus tablas existentes y el WebSocket Realtime.
-          </p>
-
-          <form onSubmit={handleGuardarSupabase} className="space-y-3.5">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                SUPABASE_URL
-              </label>
-              <input
-                type="url"
-                placeholder="https://xxxx.supabase.co"
-                value={supabaseUrl}
-                onChange={(e) => setSupabaseUrl(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                SUPABASE_KEY (anon / service_role)
-              </label>
-              <input
-                type="password"
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                value={supabaseKey}
-                onChange={(e) => setSupabaseKey(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg font-mono"
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-medium rounded-lg cursor-pointer"
-            >
-              Vincular Cliente Supabase
-            </button>
-          </form>
-        </div>
 
         {/* Parámetros de ConfiguracionInstitucion */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6">
+        <div className="w-full flex-1 bg-white border border-slate-200 rounded-xl p-6">
           <div className="flex items-center gap-2.5 mb-4">
             <Building2 className="w-4 h-4 text-slate-700" />
             <h3 className="text-sm font-semibold text-slate-900">
@@ -333,11 +276,10 @@ export default function ConfiguracionView({ dispositivos, onChanged }) {
                   <td className="py-3 px-4 text-right">
                     <button
                       onClick={() => toggleDispositivo(d)}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium border cursor-pointer ${
-                        d.activo
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium border cursor-pointer ${d.activo
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                           : 'bg-slate-100 text-slate-500 border-slate-200'
-                      }`}
+                        }`}
                     >
                       {d.activo ? 'Activo' : 'Inactivo'}
                     </button>

@@ -18,7 +18,7 @@ function formatTime(val) {
   return str.includes('T') ? str.split('T')[1].slice(0, 8) : str.slice(0, 8)
 }
 
-export default function AsistenciasIncidenciasView({ usuarios }) {
+export default function AsistenciasIncidenciasView({ usuarios, lastRealtimeEvent }) {
   const [asistencias, setAsistencias] = useState([])
   const [incidencias, setIncidencias] = useState([])
   const [tiposIncidencia, setTiposIncidencia] = useState([])
@@ -67,7 +67,7 @@ export default function AsistenciasIncidenciasView({ usuarios }) {
 
   useEffect(() => {
     cargarDatos()
-  }, [filtroFecha, filtroUsuario, filtroTipoIncidencia, soloFaltasAsist])
+  }, [filtroFecha, filtroUsuario, filtroTipoIncidencia, soloFaltasAsist, lastRealtimeEvent])
 
   const guardarJustificacion = async (incId) => {
     try {

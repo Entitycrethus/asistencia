@@ -1,12 +1,15 @@
+import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+from app.websocket_manager import ws_manager
 from app.routers import auth, dashboard, asistencias, permisos, usuarios, configuracion
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ws_manager.set_loop(asyncio.get_running_loop())
     listener = None
     if settings.NGROK_AUTHTOKEN:
         try:
@@ -30,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Sistema de Gestión de Asistencia - API",
-    description="Backend con FastAPI, SQL puro (psycopg2) y túnel Ngrok integrado para lectura QR móvil.",
+    description="Backend con FastAPI, SQL puro (psycopg2), WebSocket en tiempo real y túnel Ngrok.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -42,6 +45,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.websocket("/ws/asistencia")
+async def websocket_asistencia_endpoint(websocket: WebSocket):
+    """
+    Canal WebSocket en tiempo real: notifica instantáneamente al Dashboard en React
+    cuando se inserta o actualiza una asistencia desde Postman, desde la App Móvil (Ngrok)
+    o desde cualquier punto del sistema.
+    """
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)

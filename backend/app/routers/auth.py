@@ -8,27 +8,31 @@ router = APIRouter(prefix="/api/auth", tags=["Autenticación"])
 
 @router.post("/login", response_model=TokenResponse)
 def login(credentials: LoginRequest):
+    identificador = credentials.correo.strip()
     sql = """
         SELECT
             u.id,
-            u.codigo,
-            u.codigo_qr,
-            u.nombres,
-            u.apellidos,
-            u.correo,
+            TRIM(BOTH E' \t\n\r' FROM u.codigo) AS codigo,
+            TRIM(BOTH E' \t\n\r' FROM u.codigo_qr) AS codigo_qr,
+            TRIM(BOTH E' \t\n\r' FROM u.nombres) AS nombres,
+            TRIM(BOTH E' \t\n\r' FROM u.apellidos) AS apellidos,
+            TRIM(BOTH E' \t\n\r' FROM u.correo) AS correo,
             u.password,
-            u.activo,
-            u.rol_id,
-            u.cargo_id,
-            r.nombre AS rol_nombre,
-            c.nombre AS cargo_nombre
+            COALESCE(u.activo, TRUE) AS activo,
+            COALESCE(u.rol_id, 3) AS rol_id,
+            COALESCE(u.cargo_id, 2) AS cargo_id,
+            COALESCE(r.nombre, 'Trabajador') AS rol_nombre,
+            COALESCE(c.nombre, 'Personal') AS cargo_nombre
         FROM public.usuario u
-        INNER JOIN public.rol r ON r.id = u.rol_id
-        INNER JOIN public.cargo c ON c.id = u.cargo_id
-        WHERE u.correo = %s
+        LEFT JOIN public.rol r ON r.id = u.rol_id
+        LEFT JOIN public.cargo c ON c.id = u.cargo_id
+        WHERE LOWER(TRIM(BOTH E' \t\n\r' FROM u.correo)) = LOWER(%s)
+           OR LOWER(TRIM(BOTH E' \t\n\r' FROM u.codigo)) = LOWER(%s)
+           OR (LOWER(%s) = 'admin' AND u.rol_id = 1)
+        ORDER BY u.id ASC
         LIMIT 1;
     """
-    user_row = fetch_one(sql, (credentials.correo,))
+    user_row = fetch_one(sql, (identificador, identificador, identificador))
 
     if not user_row:
         raise HTTPException(
@@ -80,19 +84,19 @@ def get_me(payload: dict = Depends(get_current_user_payload)):
     sql = """
         SELECT
             u.id,
-            u.codigo,
-            u.codigo_qr,
-            u.nombres,
-            u.apellidos,
-            u.correo,
-            u.activo,
-            u.rol_id,
-            u.cargo_id,
-            r.nombre AS rol_nombre,
-            c.nombre AS cargo_nombre
+            TRIM(BOTH E' \t\n\r' FROM u.codigo) AS codigo,
+            TRIM(BOTH E' \t\n\r' FROM u.codigo_qr) AS codigo_qr,
+            TRIM(BOTH E' \t\n\r' FROM u.nombres) AS nombres,
+            TRIM(BOTH E' \t\n\r' FROM u.apellidos) AS apellidos,
+            TRIM(BOTH E' \t\n\r' FROM u.correo) AS correo,
+            COALESCE(u.activo, TRUE) AS activo,
+            COALESCE(u.rol_id, 3) AS rol_id,
+            COALESCE(u.cargo_id, 2) AS cargo_id,
+            COALESCE(r.nombre, 'Trabajador') AS rol_nombre,
+            COALESCE(c.nombre, 'Personal') AS cargo_nombre
         FROM public.usuario u
-        INNER JOIN public.rol r ON r.id = u.rol_id
-        INNER JOIN public.cargo c ON c.id = u.cargo_id
+        LEFT JOIN public.rol r ON r.id = u.rol_id
+        LEFT JOIN public.cargo c ON c.id = u.cargo_id
         WHERE u.id = %s
         LIMIT 1;
     """

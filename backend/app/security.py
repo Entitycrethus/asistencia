@@ -25,16 +25,18 @@ def verify_password(plain_password: str, stored_password: str) -> bool:
     """
     if not stored_password:
         return False
+    plain_clean = plain_password.strip()
+    stored_clean = stored_password.strip()
     try:
-        if stored_password.startswith(("$2b$", "$2a$", "$2y$")):
+        if stored_clean.startswith(("$2b$", "$2a$", "$2y$")):
             return bcrypt.checkpw(
-                plain_password.encode("utf-8"),
-                stored_password.encode("utf-8"),
+                plain_clean.encode("utf-8"),
+                stored_clean.encode("utf-8"),
             )
     except Exception:
         pass
     # Fallback únicamente si el registro existente en Supabase no estaba hasheado aún
-    return plain_password == stored_password
+    return plain_clean == stored_clean
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:

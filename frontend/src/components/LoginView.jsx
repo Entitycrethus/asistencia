@@ -3,7 +3,7 @@ import { ShieldCheck, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react'
 import { apiFetch } from '../lib/api'
 
 export default function LoginView({ onLoginSuccess }) {
-  const [correo, setCorreo] = useState('admin')
+  const [correo, setCorreo] = useState('admin@admin.com')
   const [password, setPassword] = useState('123456')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -39,7 +39,7 @@ export default function LoginView({ onLoginSuccess }) {
               Sistema de Asistencia
             </h1>
             <p className="text-xs text-slate-500">
-              Panel de Monitoreo y Gestión Institucional
+              Acceso por Rol (Administrador / Colaborador)
             </p>
           </div>
         </div>
@@ -54,7 +54,7 @@ export default function LoginView({ onLoginSuccess }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1.5">
-              Usuario o Correo Electrónico
+              Correo o Código de Usuario
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -63,7 +63,7 @@ export default function LoginView({ onLoginSuccess }) {
                 required
                 value={correo}
                 onChange={(e) => setCorreo(e.target.value)}
-                placeholder="admin o correo@aoe.edu.pe"
+                placeholder="admin@admin.com, jperez@aoe.edu.pe o DOC001"
                 className="w-full pl-9 pr-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-slate-900 transition-colors"
               />
             </div>
@@ -91,14 +91,48 @@ export default function LoginView({ onLoginSuccess }) {
             disabled={loading}
             className="w-full mt-2 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium rounded-lg flex items-center justify-center gap-2 transition-colors cursor-pointer"
           >
-            <span>{loading ? 'Verificando credenciales...' : 'Ingresar al Panel'}</span>
+            <span>{loading ? 'Verificando credenciales...' : 'Ingresar'}</span>
             {!loading && <ArrowRight className="w-4 h-4" />}
           </button>
         </form>
 
-        <div className="mt-6 pt-5 border-t border-slate-100 text-xs text-slate-500 flex items-center justify-between">
-          <span>Autenticación JWT + Bcrypt</span>
-          <span className="font-mono text-slate-600">FastAPI + Supabase</span>
+        {/* Selector rápido de cuentas para pruebas */}
+        <div className="mt-6 pt-5 border-t border-slate-100 space-y-2">
+          <span className="block text-[11px] font-medium text-slate-400 uppercase tracking-wider">
+            Cuentas rápidas de prueba (Contraseña: 123456)
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setCorreo('admin@admin.com')
+                setPassword('123456')
+              }}
+              className="px-2.5 py-1 rounded-md text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors cursor-pointer"
+            >
+              Admin (admin@admin.com)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCorreo('jperez@aoe.edu.pe')
+                setPassword('123456')
+              }}
+              className="px-2.5 py-1 rounded-md text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors cursor-pointer"
+            >
+              Juan Perez (Trabajador)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCorreo('mtorres@aoe.edu.pe')
+                setPassword('123456')
+              }}
+              className="px-2.5 py-1 rounded-md text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors cursor-pointer"
+            >
+              Maria Torres (Trabajador)
+            </button>
+          </div>
         </div>
       </div>
     </div>

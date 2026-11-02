@@ -4,6 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from fastapi import HTTPException
 from app.config import settings
+from app.websocket_manager import ws_manager
 
 
 @contextmanager
@@ -50,21 +51,40 @@ def fetch_one(sql: str, params: Optional[Tuple[Any, ...]] = None) -> Optional[Di
             return dict(row) if row else None
 
 
+def _detect_op_and_table(sql: str) -> Tuple[str, str]:
+    clean = " ".join(sql.strip().split()).upper()
+    op = clean.split(" ")[0] if clean else "CHANGE"
+    for tbl in ("asistencia", "historial_acceso", "incidencia", "permiso", "usuario", "horario_laboral", "dispositivo"):
+        if f"PUBLIC.{tbl.upper()}" in clean or f" {tbl.upper()} " in clean:
+            return op, tbl
+    return op, "asistencia"
+
+
 def execute_returning(sql: str, params: Optional[Tuple[Any, ...]] = None) -> Optional[Dict[str, Any]]:
-    """Ejecuta un INSERT / UPDATE / DELETE con RETURNING y confirma la transacción (COMMIT)."""
+    """
+    Ejecuta un INSERT / UPDATE / DELETE con RETURNING, confirma la transacción (COMMIT)
+    y emite la notificación en tiempo real por WebSocket a los clientes conectados.
+    """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             row = cur.fetchone() if cur.description else None
             conn.commit()
+            op, tbl = _detect_op_and_table(sql)
+            ws_manager.notify_from_sync(event_type=op, table=tbl)
             return dict(row) if row else None
 
 
 def execute_commit(sql: str, params: Optional[Tuple[Any, ...]] = None) -> int:
-    """Ejecuta una sentencia DML (INSERT, UPDATE, DELETE) y devuelve el número de filas afectadas."""
+    """
+    Ejecuta una sentencia DML (INSERT, UPDATE, DELETE), confirma la transacción (COMMIT)
+    y emite la notificación en tiempo real por WebSocket.
+    """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params or ())
             affected = cur.rowcount
             conn.commit()
+            op, tbl = _detect_op_and_table(sql)
+            ws_manager.notify_from_sync(event_type=op, table=tbl)
             return affected

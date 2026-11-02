@@ -390,39 +390,7 @@ export default function MonitorView({
             </table>
           </div>
 
-          {/* Distribución por hora de entrada */}
-          <div className="p-5 border-t border-slate-200 bg-slate-50/40 mt-auto">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-medium text-slate-700">
-                Distribución Horaria de Ingresos
-              </span>
-              <span className="text-[11px] text-slate-400">Franjas de llegada</span>
-            </div>
-            <div className="grid grid-cols-5 gap-3">
-              {flujoHorario.map((item) => {
-                const pct = Math.round((item.marcajes / maxFlujo) * 100)
-                return (
-                  <div
-                    key={item.hora}
-                    className="bg-white border border-slate-200 rounded-lg p-2.5"
-                  >
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1.5">
-                      <span className="font-mono">{item.hora}</span>
-                      <span className="font-semibold text-slate-900">
-                        {item.marcajes}
-                      </span>
-                    </div>
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-slate-900 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.max(pct, item.marcajes > 0 ? 15 : 0)}%` }}
-                      />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
+          
         </div>
 
         {/* Feed lateral en vivo: HistorialAcceso */}
